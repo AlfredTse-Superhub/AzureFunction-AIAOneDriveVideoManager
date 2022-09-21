@@ -9,17 +9,17 @@ using Microsoft.Graph;
 
 namespace OneDriveVideoManager2
 {
-    public class Program
+    public class ShareVideo
     {
         [FunctionName("ShareVideo")]
-        public async Task RunAsync([TimerTrigger("0 * 13 * * *", RunOnStartup = true)]TimerInfo myTimer, ILogger log)
+        public async Task RunAsync([TimerTrigger("0 0 0 * * *")]TimerInfo myTimer, ILogger log)
         {
             log.LogInformation($"C# Timer trigger function executed at: {DateTime.Now}");
 
             try
             {
                 string hostName = Environment.GetEnvironmentVariable("APPSETTING_hostName");
-                string siteRelativePath = Environment.GetEnvironmentVariable("APPSETTING_siteRelativePath");
+                string spSiteRelativePath = Environment.GetEnvironmentVariable("APPSETTING_spSiteRelativePath");
                 string checkerListName = Environment.GetEnvironmentVariable("APPSETTING_checkerListName");
                 string checkingVideoListName = Environment.GetEnvironmentVariable("APPSETTING_checkingVideosListName");
 
@@ -29,8 +29,8 @@ namespace OneDriveVideoManager2
                 {
                     new QueryOption("expand", "fields")
                 };
-                var agentCheckerListRequest = await client.Sites.GetByPath(siteRelativePath, hostName).Lists["AgentAndChecker"].Items.Request(queryOptions).GetAsync();
-                ForEachAgentCheckerRelation(client, agentCheckerListRequest).Wait();
+                var agentCheckerListRequest = await client.Sites.GetByPath(spSiteRelativePath, hostName).Lists["AgentAndChecker"].Items.Request(queryOptions).GetAsync();
+                ForEachAgentCheckerRelation(client, agentCheckerListRequest, log).Wait();
             }
             catch (Exception ex)
             {
@@ -38,14 +38,20 @@ namespace OneDriveVideoManager2
             }
         }
 
-        private static async Task ForEachAgentCheckerRelation(GraphServiceClient client, IListItemsCollectionPage agentCheckersRequest)
+        private static async Task ForEachAgentCheckerRelation(GraphServiceClient client, IListItemsCollectionPage agentCheckersRequest, ILogger log)
         {
             foreach (var agentchecker in agentCheckersRequest.CurrentPage)
             {
                 var targetListName = agentchecker.Fields.AdditionalData["SiteTitle"].ToString();
                 try
                 {
-                    ShareItemAccess.Share(client, agentchecker.Fields.AdditionalData["AgentMail"].ToString(), agentchecker.Fields.AdditionalData["CheckerMail"].ToString(), targetListName).Wait();
+                    ShareItemAccess.Share(
+                        client, 
+                        agentchecker.Fields.AdditionalData["AgentMail"].ToString(), 
+                        agentchecker.Fields.AdditionalData["CheckerMail"].ToString(), 
+                        targetListName,
+                        log)
+                    .Wait();
                 }
                 catch (Exception ex)
                 {
@@ -54,7 +60,8 @@ namespace OneDriveVideoManager2
             }
             if (agentCheckersRequest.NextPageRequest != null)
             {
-                ForEachAgentCheckerRelation(client, await agentCheckersRequest.NextPageRequest.GetAsync()).Wait();
+                var nextPage = await agentCheckersRequest.NextPageRequest.GetAsync();
+                ForEachAgentCheckerRelation(client, nextPage, log).Wait();
             }
         }
     }

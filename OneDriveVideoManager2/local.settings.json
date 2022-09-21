@@ -1,0 +1,17 @@
+{
+    "IsEncrypted": false,
+    "sharePointUrlIsEncrypted": false,
+    "Values": {
+        "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+        "FUNCTIONS_WORKER_RUNTIME": "dotnet",
+        "APPSETTING_tenantId": "16660935-a3e1-4737-828b-b2676b4f8ec0",
+        "APPSETTING_clientId": "10a9cb21-2b0c-4593-8b47-257a884e1d9a",
+        "APPSETTING_clientSecret": "Xes8Q~ikXYzTriVUL0pQ_CSo0ci7zaf1FE-PqbsF",
+        "APPSETTING_hostName": "M365x13740622.sharepoint.com",
+        "APPSETTING_spSiteRelativePath": "sites/AgentOneDriveVideo",
+        "APPSETTING_checkerListName": "AgentAndChecker",
+        "APPSETTING_checkingVideosListName": "CheckingVideos",
+        "APPSETTING_errorListName": "ErrorLog",
+        "APPSETTING_functionRunLogListName": "FunctionRunLog"
+    }
+}
