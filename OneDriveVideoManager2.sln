@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31919.166
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "OneDriveVideoManager2", "OneDriveVideoManager2\OneDriveVideoManager2.csproj", "{823A9098-BCCC-4383-8603-ED39E3DE93C8}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "OneDriveVideoManager", "OneDriveVideoManager2\OneDriveVideoManager.csproj", "{823A9098-BCCC-4383-8603-ED39E3DE93C8}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

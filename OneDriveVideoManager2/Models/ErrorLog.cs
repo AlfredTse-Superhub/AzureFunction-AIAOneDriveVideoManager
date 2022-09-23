@@ -4,9 +4,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace OneDriveVideoManager2.Models
+namespace OneDriveVideoManager.Models
 {
-    internal class ErrorLog
+    public class ErrorLog
     {
         public string FunctionName { get; set; }
 

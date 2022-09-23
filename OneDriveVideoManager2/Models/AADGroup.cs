@@ -5,9 +5,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace OneDriveVideoManager2.Models
+namespace OneDriveVideoManager.Models
 {
-    internal class AADGroup
+    public class AADGroup
     {
         public string GroupId { get; set; }
 

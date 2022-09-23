@@ -3,15 +3,15 @@ using Microsoft.Graph;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 
-namespace OneDriveVideoManager2
+namespace OneDriveVideoManager
 {
     public static class ShareItemAccess
     {
-        private static string hostName = Environment.GetEnvironmentVariable("APPSETTING_hostName");
-        private static string spSiteRelativePath = Environment.GetEnvironmentVariable("APPSETTING_spSiteRelativePath");
+        private static readonly string _hostName = Environment.GetEnvironmentVariable("APPSETTING_HostName");
+        private static readonly string _tenantURL = Environment.GetEnvironmentVariable("APPSETTING_TenantURL");
+        private static readonly string _spSiteRelativePath = Environment.GetEnvironmentVariable("APPSETTING_SpSiteRelativePath");
         public static async Task Share(GraphServiceClient client, string agentMail, string checkerMail, string targetListName, ILogger log)
         {
             try
@@ -33,7 +33,7 @@ namespace OneDriveVideoManager2
             IDriveItemChildrenCollectionPage saleDriveRecordingsFile, 
             string checkerMail, 
             string agentDriveId, 
-            User sale, 
+            User agent, 
             string targetListName, 
             string shaedFileId
         )
@@ -63,8 +63,9 @@ namespace OneDriveVideoManager2
                         .Invite(driveRecipient, requireSignIn, roles, sendInvitation, message, null)
                         .Request()
                         .PostAsync();
-                    string itemLink = $"https://m365x71250929-my.sharepoint.com/personal/{sale.Mail.ToLower().Replace(".", "_").Replace("@", "_")}/Documents/Shared/{video.Name}";
 
+                    string agentMailSpecial = agent.Mail.ToLower().Replace(".", "_").Replace("@", "_");
+                    string itemLink = $"{_tenantURL}/personal/{agent.Mail.ToLower().Replace(".", "_").Replace("@", "_")}/Documents/Shared/{video.Name}";
                     // Create new item in SP list
                     TimeSpan t = TimeSpan.FromMilliseconds((double)video.Video.Duration);
                     string formattedDuration = string.Format("{0:D2}:{1:D2}:{2:D2}",
@@ -85,7 +86,7 @@ namespace OneDriveVideoManager2
                                 }
                         }
                     };
-                    await client.Sites.GetByPath(spSiteRelativePath, hostName).Lists[targetListName].Items.Request().AddAsync(newItem);
+                    await client.Sites.GetByPath(_spSiteRelativePath, _hostName).Lists[targetListName].Items.Request().AddAsync(newItem);
                     var videoNewRoot = new DriveItem
                     {
                         ParentReference = new ItemReference
@@ -103,7 +104,7 @@ namespace OneDriveVideoManager2
             }
             if (saleDriveRecordingsFile.NextPageRequest != null)
             {
-                HandleVideosInOneDrive(log, client, await saleDriveRecordingsFile.NextPageRequest.GetAsync(), checkerMail, agentDriveId, sale, targetListName, shaedFileId).Wait();
+                HandleVideosInOneDrive(log, client, await saleDriveRecordingsFile.NextPageRequest.GetAsync(), checkerMail, agentDriveId, agent, targetListName, shaedFileId).Wait();
             }
         }
         private static async Task ForeachMemberInMemberGroup(

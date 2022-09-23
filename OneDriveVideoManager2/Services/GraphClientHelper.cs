@@ -1,12 +1,9 @@
 ﻿using Azure.Identity;
+using Microsoft.Extensions.Logging;
 using Microsoft.Graph;
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
-namespace OneDriveVideoManager2
+namespace OneDriveVideoManager.Services
 {
     public static class GraphClientHelper
     {
@@ -14,9 +11,9 @@ namespace OneDriveVideoManager2
         {
             try
             {
-                string tenantId = Environment.GetEnvironmentVariable("APPSETTING_tenantId");
-                string clientId = Environment.GetEnvironmentVariable("APPSETTING_clientId");
-                string clientSecret = Environment.GetEnvironmentVariable("APPSETTING_clientSecret");
+                string tenantId = Environment.GetEnvironmentVariable("APPSETTING_TenantId");
+                string clientId = Environment.GetEnvironmentVariable("APPSETTING_ClientId");
+                string clientSecret = Environment.GetEnvironmentVariable("APPSETTING_ClientSecret");
                 string[] scopes = new[] { "https://graph.microsoft.com/.default" };
 
                 TokenCredentialOptions options = new TokenCredentialOptions
@@ -33,11 +30,8 @@ namespace OneDriveVideoManager2
             }
             catch (Exception ex)
             {
-                Console.WriteLine(ex);
-                System.Environment.Exit(1);
-                return null;
+                throw;
             }
-
         }
     }
 }

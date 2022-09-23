@@ -4,14 +4,21 @@
     "Values": {
         "AzureWebJobsStorage": "UseDevelopmentStorage=true",
         "FUNCTIONS_WORKER_RUNTIME": "dotnet",
-        "APPSETTING_tenantId": "16660935-a3e1-4737-828b-b2676b4f8ec0",
-        "APPSETTING_clientId": "10a9cb21-2b0c-4593-8b47-257a884e1d9a",
-        "APPSETTING_clientSecret": "Xes8Q~ikXYzTriVUL0pQ_CSo0ci7zaf1FE-PqbsF",
-        "APPSETTING_hostName": "M365x13740622.sharepoint.com",
-        "APPSETTING_spSiteRelativePath": "sites/AgentOneDriveVideo",
-        "APPSETTING_checkerListName": "AgentAndChecker",
-        "APPSETTING_checkingVideosListName": "CheckingVideos",
-        "APPSETTING_errorListName": "ErrorLog",
-        "APPSETTING_functionRunLogListName": "FunctionRunLog"
+        "APPSETTING_TenantURL": "https://m365x13740622-my.sharepoint.com",
+        "APPSETTING_TenantId": "16660935-a3e1-4737-828b-b2676b4f8ec0",
+        "APPSETTING_ClientId": "10a9cb21-2b0c-4593-8b47-257a884e1d9a",
+        "APPSETTING_ClientSecret": "Xes8Q~ikXYzTriVUL0pQ_CSo0ci7zaf1FE-PqbsF",
+        "APPSETTING_HostName": "M365x13740622.sharepoint.com",
+        "APPSETTING_SpSiteRelativePath": "sites/AgentOneDriveVideo",
+        "APPSETTING_AgentCheckerListName": "AgentAndChecker",
+        "APPSETTING_CheckingVideosListName": "CheckingVideos",
+        "APPSETTING_ErrorListName": "ErrorLog",
+        "APPSETTING_FunctionRunLogListName": "FunctionRunLog",
+        "APPSETTING_FunctionRunLogListURL": "https://m365x13740622.sharepoint.com/sites/AgentOneDriveVideo/Lists/FunctionRunLog/AllItems.aspx?origin=createList",
+        "APPSETTING_EmailSender": "admin@M365x13740622.onmicrosoft.com",
+        "APPSETTING_EmailRecipient": "admin@M365x13740622.onmicrosoft.com",
+        "APPSETTING_EmailCCRecipient": "",
+        "APPSETTING_FunctionAppName": "OneDriveVideoManager-AIA",
+        "APPSETTING_GithubURL": "https://github.com/AlfredTse-Superhub/AzureFunction-AIAOneDriveVideoManager"
     }
 }

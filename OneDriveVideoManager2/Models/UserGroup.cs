@@ -4,10 +4,12 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace OneDriveVideoManager2.Models
+namespace OneDriveVideoManager.Models
 {
-    internal class UserGroup
+    public class UserGroup
     {
+        public int Id { get; set; }
+
         public string StaffName { get; set; }
 
         public string StaffEmail { get; set; }
