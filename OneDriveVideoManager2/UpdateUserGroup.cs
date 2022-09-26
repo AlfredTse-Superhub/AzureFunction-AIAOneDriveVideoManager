@@ -50,10 +50,12 @@ namespace OneDriveVideoManager
 
                 if (errorLogs.Count > 0)
                 {
+                    string targetListName = Environment.GetEnvironmentVariable("APPSETTING_ErrorListName1");
                     await LoggingService.CreateErrorLogToSP(
                         log,
                         graphClient,
                         _functionName,
+                        targetListName,
                         errorLogs,
                         functionRunLog);
                 }
@@ -259,7 +261,7 @@ namespace OneDriveVideoManager
                 {
                     if (string.IsNullOrWhiteSpace(functionRunLog.Details))
                     {
-                        functionRunLog.Details = "One or more usergroup update failed, please check SP list 'ErrorLog' for reference.\n";
+                        functionRunLog.Details = "One or more usergroup update failed, please check SP list 'UpdateUserGroupErrorLog' for reference.\n";
                     }
                     errorLogs.Add(new ErrorLog
                     {

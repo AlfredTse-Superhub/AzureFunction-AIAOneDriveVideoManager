@@ -59,6 +59,7 @@ namespace OneDriveVideoManager.Services
             ILogger log,
             GraphServiceClient graphClient,
             string functionName,
+            string targetListName,
             List<ErrorLog> errorLogs,
             FunctionRunLog functionRunLog
         )
@@ -67,7 +68,6 @@ namespace OneDriveVideoManager.Services
             {
                 string hostName = Environment.GetEnvironmentVariable("APPSETTING_HostName");
                 string spSiteRelativePath = Environment.GetEnvironmentVariable("APPSETTING_SpSiteRelativePath");
-                string targetListName = Environment.GetEnvironmentVariable("APPSETTING_ErrorListName");
                 functionRunLog.LastStep = "Create ErrorLog(s) to SP";
 
                 foreach (ErrorLog errorLog in errorLogs)

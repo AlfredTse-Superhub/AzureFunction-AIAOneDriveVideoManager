@@ -14,7 +14,7 @@ namespace OneDriveVideoManager
     public class ShareVideo
     {
         private readonly int _maxRetry = 2;
-        private readonly string _functionName = "UpdateUserGroup";
+        private readonly string _functionName = "ShareVideo";
 
         [FunctionName("ShareVideo")]
         public async Task RunAsync([TimerTrigger("0 0 22 * * *", RunOnStartup = true)] TimerInfo myTimer, ILogger log)
@@ -32,22 +32,30 @@ namespace OneDriveVideoManager
 
             try
             {
-                await ManageOnedriveVideos(
+                List<ListItem> agentCheckerPairs = await GetAgentCheckerPairs(
                     log,
                     graphClient,
-                    functionRunLog
-                );
-                //string hostName = Environment.GetEnvironmentVariable("APPSETTING_HostName");
-                //string spSiteRelativePath = Environment.GetEnvironmentVariable("APPSETTING_SpSiteRelativePath");
+                    functionRunLog);
 
-                //var queryOptions = new List<QueryOption>()
-                //{
-                //    new QueryOption("expand", "fields")
-                //};
-                //var agentCheckerListRequest = await graphClient.Sites.GetByPath(spSiteRelativePath, hostName).Lists["AgentAndChecker"].Items
-                //    .Request(queryOptions)
-                //    .GetAsync();
-                //ForEachAgentCheckerRelation(graphClient, agentCheckerListRequest, log).Wait();
+                List<ErrorLog> errorLogs = new List<ErrorLog>();
+                await ManageAgentGroupVideo(
+                    log,
+                    graphClient,
+                    agentCheckerPairs,
+                    errorLogs,
+                    functionRunLog);
+
+                if (errorLogs.Count > 0)
+                {
+                    string targetListName = Environment.GetEnvironmentVariable("APPSETTING_ErrorListName2");
+                    await LoggingService.CreateErrorLogToSP(
+                        log,
+                        graphClient,
+                        _functionName,
+                        targetListName,
+                        errorLogs,
+                        functionRunLog);
+                }
             }
             catch (Exception ex)
             {
@@ -70,36 +78,7 @@ namespace OneDriveVideoManager
         }
 
 
-        private async Task<List<BaseItem>> getAllItemsInCollection<BaseItem>(ICollectionPage collectionPage)
-        {
-            List<BaseItem> itemList = new List<BaseItem>();
-            itemList.AddRange(collectionPage.CurrentPage);
-            while (collectionPage.NextPageRequest != null)
-            {
-                var nextPage = await collectionPage.NextPageRequest.GetAsync();
-                itemList.AddRange(nextPage);
-            }
-
-            return itemList;
-        }
-
-        private async Task<List<BaseItem>> getAllItemsInCollection2<T>(
-            ICollectionPage<List<BaseItem>> collectionPage,
-            IGroupMembersCollectionWithReferencesPage nextPageRequest
-        )
-        {
-            List<BaseItem> itemList = new List<BaseItem>();
-            itemList.AddRange(collectionPage.CurrentPage);
-            while (collectionPage.IGroupMembersCollectionWithReferencesPage != null)
-            {
-                var nextPage = await collectionPage.NextPageRequest.GetAsync();
-                itemList.AddRange(nextPage);
-            }
-
-            return itemList;
-        }
-
-        private async Task ManageOnedriveVideos(
+        private async Task<List<ListItem>> GetAgentCheckerPairs(
             ILogger log,
             GraphServiceClient graphClient,
             FunctionRunLog functionRunLog
@@ -107,7 +86,7 @@ namespace OneDriveVideoManager
         {
             try
             {
-                functionRunLog.LastStep = "Fetch excel from SharePoint";
+                functionRunLog.LastStep = "Get agent & checker pairs from SharePoint";
                 string hostName = Environment.GetEnvironmentVariable("APPSETTING_HostName");
                 string spSiteRelativePath = Environment.GetEnvironmentVariable("APPSETTING_SpSiteRelativePath");
                 string agentCheckerListName = Environment.GetEnvironmentVariable("APPSETTING_AgentCheckerListName");
@@ -119,43 +98,36 @@ namespace OneDriveVideoManager
                 };
                 var agentCheckerRequest = await graphClient.Sites.GetByPath(spSiteRelativePath, hostName).Lists[agentCheckerListName].Items
                     .Request(queryOptions)
+                    .WithMaxRetry(_maxRetry)
                     .GetAsync();
 
-                if (agentCheckerRequest.Count == 0)
+                if (!agentCheckerRequest.Any())
                 {
                     functionRunLog.Status = "Succeeded";
                     throw new Exception("No agent-checker pairs are found in SP list");
                 }
                 // Page through collections
-                List<ListItem> agentCheckerList = new List<ListItem>();
-                agentCheckerList.AddRange(agentCheckerRequest.CurrentPage);
+                List<ListItem> agentCheckerPairs = new List<ListItem>();
+                agentCheckerPairs.AddRange(agentCheckerRequest.CurrentPage);
                 while (agentCheckerRequest.NextPageRequest != null)
                 {
                     var nextPage = await agentCheckerRequest.NextPageRequest.GetAsync();
-                    agentCheckerList.AddRange(nextPage);
+                    agentCheckerPairs.AddRange(nextPage);
                 }
 
-                List<ErrorLog> errorLogs = new List<ErrorLog>();
-                foreach (ListItem agentCheckerPair in agentCheckerList)
-                {
-                    string targetListName = agentCheckerPair.Fields.AdditionalData["SiteTitle"].ToString();
-                    await ManageAgentGroupVideo(
-                        log,
-                        graphClient,
-                        agentCheckerPair.Fields.AdditionalData["AgentMail"].ToString(),
-                        agentCheckerPair.Fields.AdditionalData["CheckerMail"].ToString(),
-                        targetListName,
-                        errorLogs);
-                }
-                //if (agentCheckerRequest.NextPageRequest != null)
-                //{
-                //    var nextPage = await agentCheckerRequest.NextPageRequest.GetAsync();
-                //    ForEachAgentCheckerRelation(client, nextPage, log).Wait();
-                //}
+                log.LogCritical("SUCCEEDED: get agent & checker pairs.");
+
+                return agentCheckerPairs;
+
             }
             catch (Exception ex)
             {
                 log.LogError($"Function terminated: current step= {functionRunLog.LastStep}");
+                if (functionRunLog.Status != "Succeeded")
+                {
+                    functionRunLog.Status = "Failed";
+                }
+                functionRunLog.Details = ex.Message;
                 throw;
             }
         }
@@ -163,82 +135,176 @@ namespace OneDriveVideoManager
 
         private async Task ManageAgentGroupVideo(
             ILogger log,
-            GraphServiceClient client,
-            string agentMail,
-            string checkerMail,
-            string targetListName,
-            List<ErrorLog> errorLogs
+            GraphServiceClient graphClient,
+            List<ListItem> agentCheckerPairs,
+            List<ErrorLog> errorLogs,
+            FunctionRunLog functionRunLog
         )
         {
-            try
-            {
-                var agentGroup = await client.Groups.Request().Filter($"mail eq \'{agentMail}\'").GetAsync();
-                string agentGroupId = agentGroup?.CurrentPage?.FirstOrDefault()?.Id;
-                if (string.IsNullOrWhiteSpace(agentGroupId))
-                {
-                    // ...?
-                }
-                var agentGroupMembers = await client.Groups[agentGroupId].Members.Request().GetAsync();
-                // ForeachMemberInMemberGroup(client, agentGroupMembers, checkerMail, targetListName, log).Wait();
+            functionRunLog.LastStep = "Manage agentGroups' videos";
+            await Parallel.ForEachAsync(agentCheckerPairs, async (agentCheckerPair, cancellationToken) =>
+            {   
+                string pairId = agentCheckerPair.Id ?? "";
+                string targetListName = agentCheckerPair.Fields.AdditionalData["SiteTitle"]?.ToString();
+                string agentMail = agentCheckerPair.Fields.AdditionalData["AgentMail"]?.ToString();
+                string checkerMail = agentCheckerPair.Fields.AdditionalData["CheckerMail"]?.ToString();
 
-                foreach (User agent in agentGroupMembers.CurrentPage)
+                try
                 {
-                    try
+                    if (string.IsNullOrWhiteSpace(targetListName) || 
+                        string.IsNullOrWhiteSpace(agentMail) || 
+                        string.IsNullOrWhiteSpace(checkerMail))
                     {
-                        var agentDetails = await client.Users[agent.Id].Drive.Request().GetAsync();
-                        var agentDriveId = agentDetails.Id;
-                        IDriveItemChildrenCollectionPage saleDriveRecordingsFile = await client.Drives[agentDriveId].Root.ItemWithPath("/Recordings").Children.Request().GetAsync();
+                        throw new Exception($"Invalid information in AgentAndChecker pair: id={pairId}.");
+                    }
+                    // Get agentGroup info and members
+                    var agentGroup = await graphClient.Groups
+                        .Request()
+                        .Filter($"mail eq \'{agentMail}\'")
+                        .WithMaxRetry(_maxRetry)
+                        .GetAsync();
+                    if (!agentGroup.CurrentPage.Any())
+                    {
+                        throw new Exception($"Invalid information for agentGroup('{agentMail}') in AgentAndChecker pair: id={pairId}.");
+                    }
+                    string agentGroupId = agentGroup?.CurrentPage?.FirstOrDefault()?.Id;
+                    var agentGroupMembersRequest = await graphClient.Groups[agentGroupId].Members
+                        .Request()
+                        .WithMaxRetry(_maxRetry)
+                        .GetAsync();
 
-                        // Create Shared folder if not created before
-                        var sharedRequest = await client.Drives[agentDriveId].Root.Children.Request().Filter("name eq \'Shared\'").GetAsync();
-                        if (sharedRequest.CurrentPage.Count == 0)
+                    // Page through collections
+                    List<DirectoryObject> agentGroupMembers = new List<DirectoryObject>();
+                    agentGroupMembers.AddRange(agentGroupMembersRequest.CurrentPage);
+                    while (agentGroupMembersRequest.NextPageRequest != null)
+                    {
+                        var nextPage = await agentGroupMembersRequest.NextPageRequest.GetAsync();
+                        agentGroupMembers.AddRange(nextPage);
+                    }
+
+                    bool hasSharingError = false;
+                    foreach (User agent in agentGroupMembers) // loop all members
+                    {
+                        string sharingErrors = "";
+                        try
                         {
-                            var stream = new DriveItem { Name = "Shared", Folder = new Folder() };
-                            await client.Drives[agentDriveId].Root.Children
+                            var agentDetails = await graphClient.Users[agent.Id].Drive
                                 .Request()
-                                .AddAsync(stream);
-                        }
+                                .WithMaxRetry(_maxRetry)
+                                .GetAsync();
+                            string agentDriveId = agentDetails.Id;
+                            var agentRecordingsRequest = await graphClient.Drives[agentDriveId].Root.ItemWithPath("/Recordings").Children
+                                .Request()
+                                .WithMaxRetry(_maxRetry)
+                                .GetAsync();
 
-                        var sharedFileRequest = await client.Drives[agentDriveId].Root.ItemWithPath("/Shared").Request().GetAsync();
-                        var sharedFileId = sharedFileRequest.Id;
-                        HandleVideosInOneDrive(log, client, saleDriveRecordingsFile, checkerMail, agentDriveId, agent, targetListName, sharedFileId).Wait();
+                            // Create 'Shared Recordings' folder if not created before
+                            var sharedRequest = await graphClient.Drives[agentDriveId].Root.Children
+                                .Request().Filter("name eq \'Shared Recordings\'")
+                                .WithMaxRetry(_maxRetry)
+                                .GetAsync();
+                            if (!sharedRequest.CurrentPage.Any())
+                            {
+                                var stream = new DriveItem { Name = "Shared Recordings", Folder = new Folder() };
+                                await graphClient.Drives[agentDriveId].Root.Children
+                                    .Request()
+                                    .WithMaxRetry(_maxRetry)
+                                    .AddAsync(stream);
+                            }
+
+                            // Share videos in 'Shared Recordings' folder
+                            var sharedFileRequest = await graphClient.Drives[agentDriveId].Root.ItemWithPath("/Shared Recordings")
+                                .Request()
+                                .WithMaxRetry(_maxRetry)
+                                .GetAsync();
+                            sharingErrors = await ShareVideosInOneDrive(
+                                log,
+                                graphClient,
+                                agentRecordingsRequest,
+                                targetListName,
+                                checkerMail,
+                                agentDriveId,
+                                sharedFileRequest.Id,
+                                agent
+                            );
+                            if (!string.IsNullOrWhiteSpace(sharingErrors))
+                            {
+                                throw new Exception("\n One or more video sharing failed:");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            if (!hasSharingError)
+                            {
+                                hasSharingError = true;
+                            }
+                            // Add errorLog if sharing errors occur
+                            errorLogs.Add(new ErrorLog
+                            {
+                                FunctionName = "ShareVideo",
+                                StaffName = agent.DisplayName,
+                                StaffEmail = agentMail,
+                                Details = ex.Message + "\n" + sharingErrors
+                            });
+                            log.LogError($"One or more onedrive operation failed. Information: Agent name={agent.DisplayName}, id={agent.Id} \n {ex.Message}");
+                        }
                     }
-                    catch (Exception ex)
+                    if (hasSharingError)
                     {
-                        log.LogError($"agent name: {agent.DisplayName}, id: {agent.Id} failed to get onedrive. \n {ex.Message}");
+                        functionRunLog.Details += "\n One or more onedrive operation failed, please check SP list 'ShareVideoErrorLog' for reference.\n";
                     }
+
                 }
-                if (agentGroupMembers.NextPageRequest != null)
+                catch (Exception ex)
                 {
-                    ForeachMemberInMemberGroup(client, await agentGroupMembers.NextPageRequest.GetAsync(), checkerMail, targetListName, log).Wait();
+                    if (string.IsNullOrWhiteSpace(functionRunLog.Details))
+                    {
+                        functionRunLog.Details = "\n One or more agentGroup operations, please check SP list 'ShareVideoErrorLog' for reference.\n";
+                    }
+                    errorLogs.Add(new ErrorLog
+                    {
+                        FunctionName = "ShareVideo",
+                        StaffName = agentMail,
+                        StaffEmail = agentMail,
+                        Details = $"Failed to fetch information for agentGroup: '{agentMail}' \n {ex.Message} \n {ex.InnerException?.Message ?? ""}"
+                    });
+                    log.LogError($"FAILED: manage videos for agentGroup: {agentMail}");
                 }
-            }
-            catch (Exception ex)
-            {
-                // log.LogError(ex.Message);
-                log.LogError($"FAILED: update group for user: {userGroup.StaffEmail}");
-            }
+            });
+            log.LogCritical("SUCCEEDED: agentGroups' videos' access updated.");
         }
 
 
-        private static async Task HandleVideosInOneDrive(
+        private async Task<string> ShareVideosInOneDrive(
             ILogger log,
-            GraphServiceClient client,
-            IDriveItemChildrenCollectionPage saleDriveRecordingsFile,
+            GraphServiceClient graphClient,
+            IDriveItemChildrenCollectionPage agentRecordingsRequest,
+            string targetListName,
             string checkerMail,
             string agentDriveId,
+            string sharedFileId,
             User agent,
-            string targetListName,
-            string shaedFileId
+            string errors = ""
         )
         {
-            foreach (Microsoft.Graph.DriveItem video in saleDriveRecordingsFile)
+            string hostName = Environment.GetEnvironmentVariable("APPSETTING_HostName");
+            string tenantURL = Environment.GetEnvironmentVariable("APPSETTING_TenantURL");
+            string spSiteRelativePath = Environment.GetEnvironmentVariable("APPSETTING_SpSiteRelativePath");
+
+            // Page through collections
+            List<DriveItem> agentRecordings = new List<DriveItem>();
+            agentRecordings.AddRange(agentRecordingsRequest);
+            while (agentRecordingsRequest.NextPageRequest != null)
             {
-                var hi = video.Video;
-                Console.WriteLine(video.Name);
+                var nextPage = await agentRecordingsRequest.NextPageRequest.GetAsync();
+                agentRecordings.AddRange(nextPage);
+            }
+
+            // Share access for each video in an agent's onedrive
+            await Parallel.ForEachAsync(agentRecordings, async (video, cancellationToken) => {
                 try
                 {
-                    // Share access
+                    // Share video: read right
                     List<DriveRecipient> driveRecipient = new List<DriveRecipient>()
                         {
                             new DriveRecipient
@@ -246,28 +312,28 @@ namespace OneDriveVideoManager
                                 Email = checkerMail
                             }
                         };
-                    var message = "Here's the file that we're collaborating on.";
-                    var requireSignIn = true;
-                    var sendInvitation = true;
+                    string message = "Here's the file that we're collaborating on.";
+                    bool requireSignIn = true;
+                    bool sendInvitation = true;
                     var roles = new List<String>()
-                                        {
-                                            "read"
-                                        };
-                    await client.Drives[agentDriveId].Items[video.Id]
+                        {
+                            "read"
+                        };
+                    await graphClient.Drives[agentDriveId].Items[video.Id]
                         .Invite(driveRecipient, requireSignIn, roles, sendInvitation, message, null)
                         .Request()
+                        .WithMaxRetry(_maxRetry)
                         .PostAsync();
 
-                    string agentMailSpecial = agent.Mail.ToLower().Replace(".", "_").Replace("@", "_");
-                    string itemLink = $"{_tenantURL}/personal/{agent.Mail.ToLower().Replace(".", "_").Replace("@", "_")}/Documents/Shared/{video.Name}";
                     // Create new item in SP list
+                    string agentMailSpecial = agent.Mail.ToLower().Replace(".", "_").Replace("@", "_");
+                    string itemLink = $"{tenantURL}/personal/{agent.Mail.ToLower().Replace(".", "_").Replace("@", "_")}/Documents/Shared/{video.Name}";
                     TimeSpan t = TimeSpan.FromMilliseconds((double)video.Video.Duration);
                     string formattedDuration = string.Format("{0:D2}:{1:D2}:{2:D2}",
                                     t.Hours,
                                     t.Minutes,
                                     t.Seconds);
-
-                    var newItem = new ListItem
+                    ListItem newItem = new ListItem
                     {
                         Fields = new FieldValueSet
                         {
@@ -280,93 +346,34 @@ namespace OneDriveVideoManager
                                 }
                         }
                     };
-                    await client.Sites.GetByPath(_spSiteRelativePath, _hostName).Lists[targetListName].Items.Request().AddAsync(newItem);
-                    var videoNewRoot = new DriveItem
+                    await graphClient.Sites.GetByPath(spSiteRelativePath, hostName).Lists[targetListName].Items
+                        .Request()
+                        .WithMaxRetry(_maxRetry)
+                        .AddAsync(newItem);
+
+                    // Update video reference
+                    DriveItem videoNewRoot = new DriveItem
                     {
                         ParentReference = new ItemReference
                         {
-                            Id = shaedFileId
+                            Id = sharedFileId
                         },
                         Name = video.Name,
                     };
-                    await client.Drives[agentDriveId].Items[video.Id].Request().UpdateAsync(videoNewRoot);
+                    await graphClient.Drives[agentDriveId].Items[video.Id]
+                        .Request()
+                        .WithMaxRetry(_maxRetry)
+                        .UpdateAsync(videoNewRoot);
+
                 }
                 catch (Exception ex)
                 {
-                    log.LogError($"Fail to sent invitation, {ex.Message}");
+                    errors += $"\n Video name={video.Name}";
+                    log.LogError($"FAILED: share access for video '{video.Name}' \n{ex.Message}");
                 }
-            }
-            if (saleDriveRecordingsFile.NextPageRequest != null)
-            {
-                HandleVideosInOneDrive(log, client, await saleDriveRecordingsFile.NextPageRequest.GetAsync(), checkerMail, agentDriveId, agent, targetListName, shaedFileId).Wait();
-            }
+            });
+
+            return errors;
         }
-        private static async Task ForeachMemberInMemberGroup(
-            GraphServiceClient client,
-            IGroupMembersCollectionWithReferencesPage agentGroupMembers,
-            string checkerMail,
-            string targetListName,
-            ILogger log
-        )
-        {
-            foreach (User agent in agentGroupMembers.CurrentPage)
-            {
-                try
-                {
-                    var agentDetails = await client.Users[agent.Id].Drive.Request().GetAsync();
-                    var agentDriveId = agentDetails.Id;
-                    IDriveItemChildrenCollectionPage saleDriveRecordingsFile = await client.Drives[agentDriveId].Root.ItemWithPath("/Recordings").Children.Request().GetAsync();
-
-                    // Create Shared folder if not created before
-                    var sharedRequest = await client.Drives[agentDriveId].Root.Children.Request().Filter("name eq \'Shared\'").GetAsync();
-                    if (sharedRequest.CurrentPage.Count == 0)
-                    {
-                        var stream = new DriveItem { Name = "Shared", Folder = new Folder() };
-                        await client.Drives[agentDriveId].Root.Children
-                            .Request()
-                            .AddAsync(stream);
-                    }
-
-                    var sharedFileRequest = await client.Drives[agentDriveId].Root.ItemWithPath("/Shared").Request().GetAsync();
-                    var sharedFileId = sharedFileRequest.Id;
-                    HandleVideosInOneDrive(log, client, saleDriveRecordingsFile, checkerMail, agentDriveId, agent, targetListName, sharedFileId).Wait();
-                }
-                catch (Exception ex)
-                {
-                    log.LogError($"agent name: {agent.DisplayName}, id: {agent.Id} failed to get onedrive. \n {ex.Message}");
-                }
-            }
-            if (agentGroupMembers.NextPageRequest != null)
-            {
-                ForeachMemberInMemberGroup(client, await agentGroupMembers.NextPageRequest.GetAsync(), checkerMail, targetListName, log).Wait();
-            }
-        }
-
-
-        //private static async Task ForEachAgentCheckerRelation(GraphServiceClient client, IListItemsCollectionPage agentCheckersRequest, ILogger log)
-        //{
-        //    foreach (var agentchecker in agentCheckersRequest.CurrentPage)
-        //    {
-        //        var targetListName = agentchecker.Fields.AdditionalData["SiteTitle"].ToString();
-        //        try
-        //        {
-        //            await ShareItemAccess.Share(
-        //                client,
-        //                agentchecker.Fields.AdditionalData["AgentMail"].ToString(),
-        //                agentchecker.Fields.AdditionalData["CheckerMail"].ToString(),
-        //                targetListName,
-        //                log);
-        //        }
-        //        catch (Exception ex)
-        //        {
-        //            Console.WriteLine(ex);
-        //        }
-        //    }
-        //    if (agentCheckersRequest.NextPageRequest != null)
-        //    {
-        //        var nextPage = await agentCheckersRequest.NextPageRequest.GetAsync();
-        //        ForEachAgentCheckerRelation(client, nextPage, log).Wait();
-        //    }
-        //}
     }
 }
