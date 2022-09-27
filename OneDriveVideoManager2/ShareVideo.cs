@@ -327,7 +327,7 @@ namespace OneDriveVideoManager
 
                     // Create new item in SP list
                     string agentMailSpecial = agent.Mail.ToLower().Replace(".", "_").Replace("@", "_");
-                    string itemLink = $"{tenantURL}/personal/{agent.Mail.ToLower().Replace(".", "_").Replace("@", "_")}/Documents/Shared/{video.Name}";
+                    string itemLink = $"{tenantURL}/personal/{agent.Mail.ToLower().Replace(".", "_").Replace("@", "_")}/Documents/Shared Recordings/{video.Name}";
                     TimeSpan t = TimeSpan.FromMilliseconds((double)video.Video.Duration);
                     string formattedDuration = string.Format("{0:D2}:{1:D2}:{2:D2}",
                                     t.Hours,
