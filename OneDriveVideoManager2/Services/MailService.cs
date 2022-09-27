@@ -79,7 +79,7 @@ namespace OneDriveVideoManager.Services
                     .WithMaxRetry(_maxRetries)
                     .PostAsync();
 
-                log.LogCritical($"SUCCEEDED: error reporting email sent to {_emailRecipient}");
+                log.LogCritical($"SUCCEEDED: Send error reporting email to {_emailRecipient}. Time: {DateTime.Now}");
 
             }
             catch (Exception ex)

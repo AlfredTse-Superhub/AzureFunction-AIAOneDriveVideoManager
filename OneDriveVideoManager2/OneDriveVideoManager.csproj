@@ -18,4 +18,5 @@
       <CopyToPublishDirectory>Never</CopyToPublishDirectory>
     </None>
   </ItemGroup>
+  <ProjectExtensions><VisualStudio><UserProperties local_1settings_1json__JsonSchema="https://json.schemastore.org/mboats-config-0.2.json" /></VisualStudio></ProjectExtensions>
 </Project>

@@ -47,7 +47,7 @@ namespace OneDriveVideoManager.Services
                     .WithMaxRetry(_maxRetry)
                     .AddAsync(newItem);
 
-                log.LogCritical("SUCCEEDED: SP functionRunLog created.");
+                log.LogCritical($"SUCCEEDED: Create SP functionRunLog. Time: {DateTime.Now}");
             }
             catch (Exception ex)
             {
@@ -70,27 +70,28 @@ namespace OneDriveVideoManager.Services
                 string spSiteRelativePath = Environment.GetEnvironmentVariable("APPSETTING_SpSiteRelativePath");
                 functionRunLog.LastStep = "Create ErrorLog(s) to SP";
 
-                foreach (ErrorLog errorLog in errorLogs)
+                await Parallel.ForEachAsync(errorLogs, async (errorLog, cancellationToken) => 
                 {
                     ListItem newItem = new ListItem
                     {
                         Fields = new FieldValueSet
                         {
                             AdditionalData = new Dictionary<string, object>()
-                        {
-                            {"FunctionName", functionName},
-                            {"StaffName", errorLog.StaffName},
-                            {"StaffEmail", errorLog.StaffEmail},
-                            {"Details", errorLog.Details}
-                        }
+                            {
+                                {"FunctionName", functionName},
+                                {"StaffName", errorLog.StaffName},
+                                {"StaffEmail", errorLog.StaffEmail},
+                                {"Details", errorLog.Details}
+                            }
                         }
                     };
                     await graphClient.Sites.GetByPath(spSiteRelativePath, hostName).Lists[targetListName].Items
                         .Request()
                         .WithMaxRetry(_maxRetry)
                         .AddAsync(newItem);
-                }
-                log.LogCritical("SUCCEEDED: SP errorLog(s) created.");
+                });
+                
+                log.LogCritical($"SUCCEEDED: Create SP errorLog(s). Time: {DateTime.Now}");
             }
             catch (Exception ex)
             {

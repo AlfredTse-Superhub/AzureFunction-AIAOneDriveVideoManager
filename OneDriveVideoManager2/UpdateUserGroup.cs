@@ -28,7 +28,7 @@ namespace OneDriveVideoManager
                 FunctionName = _functionName,
                 Details = "",
                 Status = "Running",
-                LastStep = "Initiate connection"
+                LastStep = "Initiate connection to tenant"
             };
             GraphServiceClient graphClient = GraphClientHelper.ConnectToGraphClient();
 
@@ -110,7 +110,7 @@ namespace OneDriveVideoManager
                 if (!documents.Any())
                 {
                     functionRunLog.Status = "Succeeded";
-                    throw new Exception("No 'UserGroup.xlsx' is found.");
+                    throw new Exception("'UserGroup.xlsx' is not found.");
                 }
                 DriveItem doc = documents.CurrentPage.FirstOrDefault();
                 DateTime uctTime = new DateTime(DateTime.Now.Year, DateTime.Now.Month, (DateTime.Now.Day - 1), 0, 0, 0);
@@ -121,14 +121,15 @@ namespace OneDriveVideoManager
                     throw new Exception("No updates on 'UserGroup.xlsx' is detected on the day before funcion trigger day.");
                 }
 
-                // Create List<UserGroup> from excel data
                 Stream docStream = await graphClient.Drives[documentLibrary.Id].Items[doc.Id].Content
                     .Request()
                     .WithMaxRetry(_maxRetry)
                     .GetAsync();
 
-                log.LogCritical($"SUCCEEDED: Excel file fetched, filename='{doc.Name}'.");
+                log.LogCritical($"SUCCEEDED: Fetch Excel file '{doc.Name}'. Time: {DateTime.Now}");
 
+
+                // Create List<UserGroup> from excel data
                 List<UserGroup> userGroups = new List<UserGroup>();
                 System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
                 using (docStream)
@@ -148,7 +149,12 @@ namespace OneDriveVideoManager
                                 {
                                     properties[column + 1].SetValue(newUserGroup, reader.GetValue(column), null);
                                 }
-                                userGroups.Add(newUserGroup);
+                                bool isDuplicated = userGroups.Where(e => e.StaffEmail == newUserGroup.StaffEmail).Any();
+                                if (!isDuplicated) //Drop duplicated email row
+                                {
+                                    userGroups.Add(newUserGroup);
+                                }
+                                //tempUserGroup.Add(newUserGroup); //...
                                 rowNo++;
                             }
                         } while (reader.NextResult()); //Move to NEXT SHEET
@@ -160,16 +166,28 @@ namespace OneDriveVideoManager
                     .Request()
                     .WithMaxRetry(_maxRetry)
                     .GetAsync();
-                List<Group> allGroups = getGroupsResult.CurrentPage.Where(e => e.Description?.ToLower() == "videosharingflow").ToList();
-                List<AADGroup> aadGroups = new List<AADGroup>();
 
+                // Page through collections
+                List<Group> allGroups = getGroupsResult.CurrentPage.ToList();
+                while (getGroupsResult.NextPageRequest != null)
+                {
+                    allGroups.AddRange(await getGroupsResult.NextPageRequest.GetAsync());
+                }
+                allGroups = allGroups.Where(e => e.Description?.ToLower() == "videosharingflow").ToList();
+
+                List<AADGroup> aadGroups = new List<AADGroup>();
                 foreach (Group group in allGroups)
                 {
                     var memberListResult = await graphClient.Groups[group.Id].Members
                         .Request()
                         .WithMaxRetry(_maxRetry)
                         .GetAsync();
-                    var memberList = memberListResult.CurrentPage.ToList(); /// paging...
+                    // Page through collections
+                    List<DirectoryObject> memberList = memberListResult.CurrentPage.ToList(); 
+                    while (memberListResult.NextPageRequest != null)
+                    {
+                        memberList.AddRange(await memberListResult.NextPageRequest.GetAsync());
+                    }
                     aadGroups.Add(new AADGroup()
                     {
                         GroupId = group.Id,
@@ -178,14 +196,14 @@ namespace OneDriveVideoManager
                     });
                 }
 
-                log.LogCritical("SUCCEEDED: Excel data processed.");
+                log.LogCritical($"SUCCEEDED: Process excel data. Time: {DateTime.Now}");
 
                 return (userGroups, aadGroups);
 
             }
             catch (Exception ex)
             {
-                log.LogError($"Function terminated: current step= {functionRunLog.LastStep}");
+                log.LogError($"Function terminated: current step='{functionRunLog.LastStep}'");
                 if (functionRunLog.Status != "Succeeded")
                 {
                     functionRunLog.Status = "Failed";
@@ -227,7 +245,7 @@ namespace OneDriveVideoManager
                     if ((!string.IsNullOrWhiteSpace(userGroup.AgentGroup) && !isAgentGroupValid) 
                         || (!string.IsNullOrWhiteSpace(userGroup.CheckerGroup) && !isCheckerGroupValid)) // validate userGroup name
                     {
-                        throw new Exception($"Invalid usergroup name.");
+                        throw new Exception($"Invalid usergroup name ({userGroup.AgentGroup}/{userGroup.CheckerGroup}).");
                     }
 
                     // Update users' group
@@ -268,12 +286,12 @@ namespace OneDriveVideoManager
                         FunctionName = "UpdateUserGroup",
                         StaffName = userGroup.StaffName,
                         StaffEmail = userGroup.StaffEmail,
-                        Details = $"{ex.Message} \n Information: userEmail='{userGroup.StaffEmail}', excel rowNo={userGroup.Id} \n{ex.InnerException?.Message ?? ""}"
+                        Details = $"{ex.Message} \n\n Information: userEmail='{userGroup.StaffEmail}', excel rowNo={userGroup.Id} \n{ex.InnerException?.Message ?? ""}"
                     });
-                    log.LogError($"FAILED: update group for user: {userGroup.StaffEmail}");
+                    log.LogError($"FAILED: Update group for user '{userGroup.StaffEmail}'");
                 }
             });
-            log.LogCritical("SUCCEEDED: User groups updated.");
+            log.LogCritical($"SUCCEEDED: Update user groups. Time: {DateTime.Now}");
         }
 
         private async Task AddGroupMember(GraphServiceClient graphClient, string userId, string groupId)

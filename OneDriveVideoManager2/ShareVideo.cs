@@ -17,7 +17,7 @@ namespace OneDriveVideoManager
         private readonly string _functionName = "ShareVideo";
 
         [FunctionName("ShareVideo")]
-        public async Task RunAsync([TimerTrigger("0 0 22 * * *", RunOnStartup = true)] TimerInfo myTimer, ILogger log)
+        public async Task RunAsync([TimerTrigger("0 0 22 * * *")] TimerInfo myTimer, ILogger log)
         {
             log.LogInformation($"C# Timer trigger function({_functionName}) executed at: {DateTime.Now}");
 
@@ -106,16 +106,14 @@ namespace OneDriveVideoManager
                     functionRunLog.Status = "Succeeded";
                     throw new Exception("No agent-checker pairs are found in SP list");
                 }
-                // Page through collections
-                List<ListItem> agentCheckerPairs = new List<ListItem>();
-                agentCheckerPairs.AddRange(agentCheckerRequest.CurrentPage);
-                while (agentCheckerRequest.NextPageRequest != null)
+                
+                List<ListItem> agentCheckerPairs = agentCheckerRequest.CurrentPage.ToList();
+                while (agentCheckerRequest.NextPageRequest != null) // Page through collections
                 {
-                    var nextPage = await agentCheckerRequest.NextPageRequest.GetAsync();
-                    agentCheckerPairs.AddRange(nextPage);
+                    agentCheckerPairs.AddRange(await agentCheckerRequest.NextPageRequest.GetAsync());
                 }
 
-                log.LogCritical("SUCCEEDED: get agent & checker pairs.");
+                log.LogCritical($"SUCCEEDED: Get agent & checker pairs. Time: {DateTime.Now}");
 
                 return agentCheckerPairs;
 
@@ -173,13 +171,10 @@ namespace OneDriveVideoManager
                         .WithMaxRetry(_maxRetry)
                         .GetAsync();
 
-                    // Page through collections
-                    List<DirectoryObject> agentGroupMembers = new List<DirectoryObject>();
-                    agentGroupMembers.AddRange(agentGroupMembersRequest.CurrentPage);
-                    while (agentGroupMembersRequest.NextPageRequest != null)
+                    List<DirectoryObject> agentGroupMembers = agentGroupMembersRequest.CurrentPage.ToList();
+                    while (agentGroupMembersRequest.NextPageRequest != null) // Page through collections
                     {
-                        var nextPage = await agentGroupMembersRequest.NextPageRequest.GetAsync();
-                        agentGroupMembers.AddRange(nextPage);
+                        agentGroupMembers.AddRange(await agentGroupMembersRequest.NextPageRequest.GetAsync());
                     }
 
                     bool hasSharingError = false;
@@ -246,7 +241,7 @@ namespace OneDriveVideoManager
                                 StaffEmail = agentMail,
                                 Details = ex.Message + "\n" + sharingErrors
                             });
-                            log.LogError($"One or more onedrive operation failed. Information: Agent name={agent.DisplayName}, id={agent.Id} \n {ex.Message}");
+                            log.LogError($"One or more onedrive operation failed. Information: Agent name='{agent.DisplayName}', id={agent.Id} \n {ex.Message}");
                         }
                     }
                     if (hasSharingError)
@@ -271,7 +266,7 @@ namespace OneDriveVideoManager
                     log.LogError($"FAILED: manage videos for agentGroup: {agentMail}");
                 }
             });
-            log.LogCritical("SUCCEEDED: agentGroups' videos' access updated.");
+            log.LogCritical($"SUCCEEDED: agentGroups' videos' access updated. Time: {DateTime.Now}");
         }
 
 
@@ -291,13 +286,11 @@ namespace OneDriveVideoManager
             string tenantURL = Environment.GetEnvironmentVariable("APPSETTING_TenantURL");
             string spSiteRelativePath = Environment.GetEnvironmentVariable("APPSETTING_SpSiteRelativePath");
 
-            // Page through collections
-            List<DriveItem> agentRecordings = new List<DriveItem>();
-            agentRecordings.AddRange(agentRecordingsRequest);
-            while (agentRecordingsRequest.NextPageRequest != null)
+
+            List<DriveItem> agentRecordings = agentRecordingsRequest.ToList();
+            while (agentRecordingsRequest.NextPageRequest != null) // Page through collections
             {
-                var nextPage = await agentRecordingsRequest.NextPageRequest.GetAsync();
-                agentRecordings.AddRange(nextPage);
+                agentRecordings.AddRange(await agentRecordingsRequest.NextPageRequest.GetAsync());
             }
 
             // Share access for each video in an agent's onedrive
@@ -338,12 +331,12 @@ namespace OneDriveVideoManager
                         Fields = new FieldValueSet
                         {
                             AdditionalData = new Dictionary<string, object>()
-                                {
-                                    {"Title", "New video"},
-                                    {"Checked", false},
-                                    {"Duration", formattedDuration},
-                                    {"LinkToVideo", itemLink}
-                                }
+                            {
+                                {"Title", "New video"},
+                                {"Checked", false},
+                                {"Duration", formattedDuration},
+                                {"LinkToVideo", itemLink}
+                            }
                         }
                     };
                     await graphClient.Sites.GetByPath(spSiteRelativePath, hostName).Lists[targetListName].Items
@@ -368,7 +361,7 @@ namespace OneDriveVideoManager
                 }
                 catch (Exception ex)
                 {
-                    errors += $"\n Video name={video.Name}";
+                    errors += $"\n Video name='{video.Name}'";
                     log.LogError($"FAILED: share access for video '{video.Name}' \n{ex.Message}");
                 }
             });
