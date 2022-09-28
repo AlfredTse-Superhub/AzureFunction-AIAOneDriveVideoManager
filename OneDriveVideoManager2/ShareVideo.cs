@@ -17,7 +17,7 @@ namespace OneDriveVideoManager
         private readonly string _functionName = "ShareVideo";
 
         [FunctionName("ShareVideo")]
-        public async Task RunAsync([TimerTrigger("0 0 22 * * *")] TimerInfo myTimer, ILogger log)
+        public async Task RunAsync([TimerTrigger("0 0 0 * * *")] TimerInfo myTimer, ILogger log)
         {
             log.LogInformation($"C# Timer trigger function({_functionName}) executed at: {DateTime.Now}");
 

@@ -136,28 +136,24 @@ namespace OneDriveVideoManager
                 {
                     using (var reader = ExcelReaderFactory.CreateReader(docStream))
                     {
-                        do
+                        reader.Read(); //Skip header line
+                        int rowNo = 2;
+                        while (reader.Read()) //Each ROW
                         {
-                            reader.Read(); //Skip header line
-                            int rowNo = 2;
-                            while (reader.Read()) //Each ROW
+                            UserGroup newUserGroup = new UserGroup();
+                            var properties = newUserGroup.GetType().GetProperties();
+                            properties[0].SetValue(newUserGroup, rowNo, null);
+                            for (int column = 0; column < reader.FieldCount; column++)
                             {
-                                UserGroup newUserGroup = new UserGroup();
-                                var properties = newUserGroup.GetType().GetProperties();
-                                properties[0].SetValue(newUserGroup, rowNo, null);
-                                for (int column = 0; column < reader.FieldCount; column++)
-                                {
-                                    properties[column + 1].SetValue(newUserGroup, reader.GetValue(column), null);
-                                }
-                                bool isDuplicated = userGroups.Where(e => e.StaffEmail == newUserGroup.StaffEmail).Any();
-                                if (!isDuplicated) //Drop duplicated email row
-                                {
-                                    userGroups.Add(newUserGroup);
-                                }
-                                //tempUserGroup.Add(newUserGroup); //...
-                                rowNo++;
+                                properties[column + 1].SetValue(newUserGroup, reader.GetValue(column), null);
                             }
-                        } while (reader.NextResult()); //Move to NEXT SHEET
+                            bool isDuplicated = userGroups.Where(e => e.StaffEmail == newUserGroup.StaffEmail).Any();
+                            if (!isDuplicated) //Drop duplicated email row
+                            {
+                                userGroups.Add(newUserGroup);
+                            }
+                            rowNo++;
+                        }
                     }
                 }
 
