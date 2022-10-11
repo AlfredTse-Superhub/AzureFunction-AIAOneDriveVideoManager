@@ -7,19 +7,21 @@ namespace OneDriveVideoManager.Services
 {
     public static class GraphClientHelper
     {
-        public static GraphServiceClient ConnectToGraphClient()
+        public static GraphServiceClient ConnectToGraphClient(bool useTestTenant = false)
         {
             try
             {
-                string tenantId = Environment.GetEnvironmentVariable("APPSETTING_TenantId");
-                string clientId = Environment.GetEnvironmentVariable("APPSETTING_ClientId");
-                string clientSecret = Environment.GetEnvironmentVariable("APPSETTING_ClientSecret");
+                string environment = (useTestTenant) ? "-Test" : "";
+                string tenantId = Environment.GetEnvironmentVariable($"APPSETTING_TenantId{environment}");
+                string clientId = Environment.GetEnvironmentVariable($"APPSETTING_ClientId{environment}");
+                string clientSecret = Environment.GetEnvironmentVariable($"APPSETTING_ClientSecret{environment}");
                 string[] scopes = new[] { "https://graph.microsoft.com/.default" };
 
                 TokenCredentialOptions options = new TokenCredentialOptions
                 {
-                    AuthorityHost = AzureAuthorityHosts.AzurePublicCloud
+                    AuthorityHost = AzureAuthorityHosts.AzurePublicCloud,
                 };
+
                 ClientSecretCredential clientSecretCredential = new ClientSecretCredential(
                     tenantId,
                     clientId,

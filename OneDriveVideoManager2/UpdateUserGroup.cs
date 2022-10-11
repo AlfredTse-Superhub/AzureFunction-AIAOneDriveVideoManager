@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using ExcelDataReader;
+using ExcelDataReader.Log;
 using Microsoft.Azure.WebJobs;
 using Microsoft.Azure.WebJobs.Host;
 using Microsoft.Extensions.Logging;
@@ -16,24 +17,39 @@ namespace OneDriveVideoManager
 {
     public class UpdateUserGroup
     {
-        private readonly int _maxRetry = 2;
         private readonly string _functionName = "UpdateUserGroup";
+        private readonly int _maxRetry = 2;
+        private Drive _documentLibrary;
+        private byte[] _docContent;
 
         [FunctionName("UpdateUserGroup")]
-        public async Task Run([TimerTrigger("0 0 0 * * *")]TimerInfo myTimer, ILogger log)
+        public async Task Run([TimerTrigger("0 0 10 * * *")]TimerInfo myTimer, ILogger log)
         {
             log.LogInformation($"C# Timer trigger function({_functionName}) executed at: {DateTime.Now}");
 
             FunctionRunLog functionRunLog = new FunctionRunLog { 
+                Id = "",
                 FunctionName = _functionName,
                 Details = "",
                 Status = "Running",
                 LastStep = "Initiate connection to tenant"
             };
+
             GraphServiceClient graphClient = GraphClientHelper.ConnectToGraphClient();
+
+            // In case CDX tenant can't send email, use another tenant to test mailing function
+            bool sendEmailWithTestTenant = bool.Parse(Environment.GetEnvironmentVariable("APPSETTING_SendEmailWithTestTenant"));
+            GraphServiceClient graphClientForMail = (sendEmailWithTestTenant)
+                ? GraphClientHelper.ConnectToGraphClient(useTestTenant: true)
+                : graphClient;
 
             try
             {
+                await LoggingService.PostFunctionRunLogToSP(
+                    log,
+                    graphClient,
+                    functionRunLog);
+
                 var excelData = await FetchExcelFromSP(
                     log,
                     graphClient,
@@ -59,19 +75,26 @@ namespace OneDriveVideoManager
                         errorLogs,
                         functionRunLog);
                 }
+                functionRunLog.UpdatedRecords = functionRunLog.TotalRecords - errorLogs.Count;
+
+                await SaveExcelToSP(
+                    log,
+                    graphClient,
+                    functionRunLog);
+
             }
             catch (Exception ex)
             {
                 log.LogError($"{ex.Message} \n{ex.InnerException?.Message ?? ""}");
                 await MailService.SendReportErrorEmail(
                     log,
-                    graphClient,
+                    graphClientForMail,
                     _functionName,
                     functionRunLog.Details);
             }
             finally
             {
-                await LoggingService.CreateFunctionRunLogToSP(
+                await LoggingService.PostFunctionRunLogToSP(
                     log,
                     graphClient,
                     functionRunLog);
@@ -94,12 +117,12 @@ namespace OneDriveVideoManager
                 string spSiteRelativePath = Environment.GetEnvironmentVariable("APPSETTING_SpSiteRelativePath");
 
                 // Fetch excel from SP Documents
-                Drive documentLibrary = await graphClient.Sites.GetByPath(spSiteRelativePath, hostName).Drive
+                _documentLibrary = await graphClient.Sites.GetByPath(spSiteRelativePath, hostName).Drive
                     .Request()
                     .WithMaxRetry(_maxRetry)
                     .GetAsync();
 
-                var documents = await graphClient.Drives[documentLibrary.Id].Root.Children
+                var documents = await graphClient.Drives[_documentLibrary.Id].Root.Children
                     .Request()
                     .Filter("name eq 'UserGroup.xlsx'")
                     .WithMaxRetry(_maxRetry)
@@ -121,80 +144,97 @@ namespace OneDriveVideoManager
                     throw new Exception("No updates on 'UserGroup.xlsx' is detected on the day before funcion trigger day.");
                 }
 
-                Stream docStream = await graphClient.Drives[documentLibrary.Id].Items[doc.Id].Content
+
+                // Get file content and save byte[]
+                Stream docStream = await graphClient.Drives[_documentLibrary.Id].Items[doc.Id].Content
                     .Request()
                     .WithMaxRetry(_maxRetry)
                     .GetAsync();
 
-                log.LogCritical($"SUCCEEDED: Fetch Excel file '{doc.Name}'. Time: {DateTime.Now}");
+                MemoryStream ms = new MemoryStream();
+                docStream.CopyTo(ms);
+                _docContent = ms.ToArray();
+
+                log.LogCritical($"SUCCEEDED: Fetch Excel file '{doc.Name}'.   Ended at: {DateTime.Now}");
 
 
-                // Create List<UserGroup> from excel data
-                List<UserGroup> userGroups = new List<UserGroup>();
-                System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
-                using (docStream)
-                {
-                    using (var reader = ExcelReaderFactory.CreateReader(docStream))
-                    {
-                        reader.Read(); //Skip header line
-                        int rowNo = 2;
-                        while (reader.Read()) //Each ROW
-                        {
-                            UserGroup newUserGroup = new UserGroup();
-                            var properties = newUserGroup.GetType().GetProperties();
-                            properties[0].SetValue(newUserGroup, rowNo, null);
-                            for (int column = 0; column < reader.FieldCount; column++)
-                            {
-                                properties[column + 1].SetValue(newUserGroup, reader.GetValue(column), null);
-                            }
-                            bool isDuplicated = userGroups.Where(e => e.StaffEmail == newUserGroup.StaffEmail).Any();
-                            if (!isDuplicated) //Drop duplicated email row
-                            {
-                                userGroups.Add(newUserGroup);
-                            }
-                            rowNo++;
-                        }
-                    }
-                }
+                // Process excel data and create new data models
+                var excelData = await ProcessExcelData(
+                    log,
+                    graphClient,
+                    docStream,
+                    functionRunLog);
 
-                // Create List<AADGroup> from fetching 'videosharingflow' related groups
-                var getGroupsResult = await graphClient.Groups
-                    .Request()
-                    .WithMaxRetry(_maxRetry)
-                    .GetAsync();
+                return excelData;
+                //// Create List<UserGroup> from excel data
+                //List<UserGroup> userGroups = new List<UserGroup>();
+                //System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+                //int rowNo = 1;
+                //using (docStream)
+                //{
+                //    using (var reader = ExcelReaderFactory.CreateReader(docStream))
+                //    {
+                //        while (reader.Read()) //Each ROW
+                //        {
+                //            if (rowNo > 1) //Skip header line
+                //            {
+                //                UserGroup newUserGroup = new UserGroup();
+                //                var properties = newUserGroup.GetType().GetProperties();
+                //                properties[0].SetValue(newUserGroup, rowNo, null);
+                //                for (int column = 0; column < reader.FieldCount; column++)
+                //                {
+                //                    properties[column + 1].SetValue(newUserGroup, reader.GetValue(column), null);
+                //                }
+                //                bool isDuplicated = userGroups.Where(e => e.StaffEmail == newUserGroup.StaffEmail).Any();
+                //                if (!isDuplicated) //Drop duplicated email row
+                //                {
+                //                    userGroups.Add(newUserGroup);
+                //                }
+                //            }
+                //            rowNo++;
+                //        }
+                //    }
+                //}
+                //functionRunLog.TotalRecords = rowNo - 1;
 
-                // Page through collections
-                List<Group> allGroups = getGroupsResult.CurrentPage.ToList();
-                while (getGroupsResult.NextPageRequest != null)
-                {
-                    allGroups.AddRange(await getGroupsResult.NextPageRequest.GetAsync());
-                }
-                allGroups = allGroups.Where(e => e.Description?.ToLower() == "videosharingflow").ToList();
+                //// Create List<AADGroup> from fetching 'videosharingflow' related groups
+                //var getGroupsResult = await graphClient.Groups
+                //    .Request()
+                //    .WithMaxRetry(_maxRetry)
+                //    .GetAsync();
 
-                List<AADGroup> aadGroups = new List<AADGroup>();
-                foreach (Group group in allGroups)
-                {
-                    var memberListResult = await graphClient.Groups[group.Id].Members
-                        .Request()
-                        .WithMaxRetry(_maxRetry)
-                        .GetAsync();
-                    // Page through collections
-                    List<DirectoryObject> memberList = memberListResult.CurrentPage.ToList(); 
-                    while (memberListResult.NextPageRequest != null)
-                    {
-                        memberList.AddRange(await memberListResult.NextPageRequest.GetAsync());
-                    }
-                    aadGroups.Add(new AADGroup()
-                    {
-                        GroupId = group.Id,
-                        GroupName = group.DisplayName,
-                        MemberList = memberList
-                    });
-                }
+                //// Page through collections
+                //List<Group> allGroups = getGroupsResult.CurrentPage.ToList();
+                //while (getGroupsResult.NextPageRequest != null)
+                //{
+                //    allGroups.AddRange(await getGroupsResult.NextPageRequest.GetAsync());
+                //}
+                //allGroups = allGroups.Where(e => e.Description?.ToLower() == "videosharingflow").ToList();
 
-                log.LogCritical($"SUCCEEDED: Process excel data. Time: {DateTime.Now}");
+                //List<AADGroup> aadGroups = new List<AADGroup>();
+                //foreach (Group group in allGroups)
+                //{
+                //    var memberListResult = await graphClient.Groups[group.Id].Members
+                //        .Request()
+                //        .WithMaxRetry(_maxRetry)
+                //        .GetAsync();
+                //    // Page through collections
+                //    List<DirectoryObject> memberList = memberListResult.CurrentPage.ToList(); 
+                //    while (memberListResult.NextPageRequest != null)
+                //    {
+                //        memberList.AddRange(await memberListResult.NextPageRequest.GetAsync());
+                //    }
+                //    aadGroups.Add(new AADGroup()
+                //    {
+                //        GroupId = group.Id,
+                //        GroupName = group.DisplayName,
+                //        MemberList = memberList
+                //    });
+                //}
 
-                return (userGroups, aadGroups);
+                //log.LogCritical($"SUCCEEDED: Process excel data.   Ended at: {DateTime.Now}");
+
+                //return (userGroups, aadGroups);
 
             }
             catch (Exception ex)
@@ -208,6 +248,88 @@ namespace OneDriveVideoManager
                 throw;
             }
         }
+
+
+        private async Task<(List<UserGroup> userGroups, List<AADGroup> aadGroups)> ProcessExcelData(
+            ILogger log,
+            GraphServiceClient graphClient,
+            Stream docStream,
+            FunctionRunLog functionRunLog
+        )
+        {
+            functionRunLog.LastStep = "Process excel data.";
+
+            // Create List<UserGroup> from excel data
+            List<UserGroup> userGroups = new List<UserGroup>();
+            System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+            int rowNo = 1;
+            using (docStream)
+            {
+                using (var reader = ExcelReaderFactory.CreateReader(docStream))
+                {
+                    while (reader.Read()) //Each ROW
+                    {
+                        if (rowNo > 1) //Skip header line
+                        {
+                            UserGroup newUserGroup = new UserGroup();
+                            var properties = newUserGroup.GetType().GetProperties();
+                            properties[0].SetValue(newUserGroup, rowNo, null);
+                            for (int column = 0; column < reader.FieldCount; column++)
+                            {
+                                properties[column + 1].SetValue(newUserGroup, reader.GetValue(column), null);
+                            }
+                            bool isDuplicated = userGroups.Where(e => e.StaffEmail == newUserGroup.StaffEmail).Any();
+                            if (!isDuplicated) //Drop duplicated email row
+                            {
+                                userGroups.Add(newUserGroup);
+                            }
+                        }
+                        rowNo++;
+                    }
+                }
+            }
+            functionRunLog.TotalRecords = rowNo - 1;
+
+
+            // Create List<AADGroup> from fetching 'videosharingflow' related groups
+            var getGroupsResult = await graphClient.Groups
+                .Request()
+                .WithMaxRetry(_maxRetry)
+                .GetAsync();
+
+            List<Group> allGroups = getGroupsResult.CurrentPage.ToList();
+            while (getGroupsResult.NextPageRequest != null) // Page through collections
+            {
+                allGroups.AddRange(await getGroupsResult.NextPageRequest.GetAsync());
+            }
+            allGroups = allGroups.Where(e => e.Description?.ToLower() == "videosharingflow").ToList();
+
+            List<AADGroup> aadGroups = new List<AADGroup>();
+            foreach (Group group in allGroups)
+            {
+                var memberListResult = await graphClient.Groups[group.Id].Members
+                    .Request()
+                    .WithMaxRetry(_maxRetry)
+                    .GetAsync();
+
+                List<DirectoryObject> memberList = memberListResult.CurrentPage.ToList();
+                while (memberListResult.NextPageRequest != null) // Page through collections
+                {
+                    memberList.AddRange(await memberListResult.NextPageRequest.GetAsync());
+                }
+                aadGroups.Add(new AADGroup()
+                {
+                    GroupId = group.Id,
+                    GroupName = group.DisplayName,
+                    MemberList = memberList
+                });
+            }
+
+            log.LogCritical($"SUCCEEDED: Process excel data.   Ended at: {DateTime.Now}");
+
+            return (userGroups, aadGroups);
+        }
+
 
         private async Task ManageUserGroup(
             ILogger log, 
@@ -287,7 +409,7 @@ namespace OneDriveVideoManager
                     log.LogError($"FAILED: Update group for user '{userGroup.StaffEmail}'");
                 }
             });
-            log.LogCritical($"SUCCEEDED: Update user groups. Time: {DateTime.Now}");
+            log.LogCritical($"SUCCEEDED: Update user groups.   Ended at: {DateTime.Now}");
         }
 
         private async Task AddGroupMember(GraphServiceClient graphClient, string userId, string groupId)
@@ -308,6 +430,29 @@ namespace OneDriveVideoManager
                 .Request()
                 .WithMaxRetry(_maxRetry)
                 .DeleteAsync();
+        }
+
+        private async Task SaveExcelToSP(ILogger log, GraphServiceClient graphClient, FunctionRunLog functionRunLog)
+        {
+            try
+            {
+                functionRunLog.LastStep = "Create excel to SP";
+
+                string filename = $"UserGroup_{DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss")}.xlsx";
+                using MemoryStream ms = new MemoryStream(_docContent);
+
+                await graphClient.Drives[_documentLibrary.Id].Root.ItemWithPath(filename).Content
+                    .Request()
+                    .WithMaxRetry(_maxRetry)
+                    .PutAsync<DriveItem>(ms);
+
+                log.LogCritical($"SUCCEEDED: Create new excel file to SP.   Ended at: {DateTime.Now}");
+            }
+            catch (Exception ex)
+            {
+                functionRunLog.Details += $"Failed to create excel in SP. \n {ex.Message} \n";
+                log.LogError($"FAILED:  create excel in SP. \n{ex.Message} \n{ex.InnerException?.Message ?? ""}");
+            }
         }
     }
 }

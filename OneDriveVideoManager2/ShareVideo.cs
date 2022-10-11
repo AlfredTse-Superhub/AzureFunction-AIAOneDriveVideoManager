@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Azure.WebJobs;
 using Microsoft.Azure.WebJobs.Host;
@@ -17,31 +18,53 @@ namespace OneDriveVideoManager
         private readonly string _functionName = "ShareVideo";
 
         [FunctionName("ShareVideo")]
-        public async Task RunAsync([TimerTrigger("0 0 0 * * *")] TimerInfo myTimer, ILogger log)
+        public async Task RunAsync([TimerTrigger("0 0 10 * * *")] TimerInfo myTimer, ILogger log)
         {
             log.LogInformation($"C# Timer trigger function({_functionName}) executed at: {DateTime.Now}");
 
             FunctionRunLog functionRunLog = new FunctionRunLog
             {
+                Id = "",
                 FunctionName = _functionName,
                 Details = "",
                 Status = "Running",
                 LastStep = "Initiate connection"
             };
+
             GraphServiceClient graphClient = GraphClientHelper.ConnectToGraphClient();
+
+            // In case CDX tenant can't send email, use another tenant to test mailing function
+            bool sendEmailWithTestTenant = bool.Parse(Environment.GetEnvironmentVariable("APPSETTING_SendEmailWithTestTenant"));
+            GraphServiceClient graphClientForMail = (sendEmailWithTestTenant)
+                ? GraphClientHelper.ConnectToGraphClient(useTestTenant: true)
+                : graphClient;
 
             try
             {
+                await LoggingService.PostFunctionRunLogToSP(
+                    log,
+                    graphClient,
+                    functionRunLog);
+
                 List<ListItem> agentCheckerPairs = await GetAgentCheckerPairs(
                     log,
                     graphClient,
                     functionRunLog);
 
-                List<ErrorLog> errorLogs = new List<ErrorLog>();
+                List<Checker> checkers = new();
+                List<ErrorLog> errorLogs = new();
                 await ManageAgentGroupVideo(
                     log,
                     graphClient,
                     agentCheckerPairs,
+                    checkers,
+                    errorLogs,
+                    functionRunLog);
+
+                await SendEmailToChecker(
+                    log,
+                    graphClientForMail,
+                    checkers,
                     errorLogs,
                     functionRunLog);
 
@@ -62,13 +85,13 @@ namespace OneDriveVideoManager
                 log.LogError($"{ex.Message} \n{ex.InnerException?.Message ?? ""}");
                 await MailService.SendReportErrorEmail(
                     log,
-                    graphClient,
+                    graphClientForMail,
                     _functionName,
                     functionRunLog.Details);
             }
             finally
             {
-                await LoggingService.CreateFunctionRunLogToSP(
+                await LoggingService.PostFunctionRunLogToSP(
                     log,
                     graphClient,
                     functionRunLog);
@@ -113,7 +136,7 @@ namespace OneDriveVideoManager
                     agentCheckerPairs.AddRange(await agentCheckerRequest.NextPageRequest.GetAsync());
                 }
 
-                log.LogCritical($"SUCCEEDED: Get agent & checker pairs. Time: {DateTime.Now}");
+                log.LogCritical($"SUCCEEDED: Get agent & checker pairs.   Ended at: {DateTime.Now}");
 
                 return agentCheckerPairs;
 
@@ -135,6 +158,7 @@ namespace OneDriveVideoManager
             ILogger log,
             GraphServiceClient graphClient,
             List<ListItem> agentCheckerPairs,
+            List<Checker> checkers,
             List<ErrorLog> errorLogs,
             FunctionRunLog functionRunLog
         )
@@ -144,11 +168,12 @@ namespace OneDriveVideoManager
             {   
                 string pairId = agentCheckerPair.Id ?? "";
                 string targetListName = agentCheckerPair.Fields.AdditionalData["SiteTitle"]?.ToString();
-                string agentMail = agentCheckerPair.Fields.AdditionalData["AgentMail"]?.ToString();
-                string checkerMail = agentCheckerPair.Fields.AdditionalData["CheckerMail"]?.ToString();
+                string agentMail = agentCheckerPair.Fields.AdditionalData["AgentMail"]?.ToString().Trim();
+                string checkerMail = agentCheckerPair.Fields.AdditionalData["CheckerMail"]?.ToString().Trim();
 
                 try
                 {
+                    // Validate agentChecker info
                     if (string.IsNullOrWhiteSpace(targetListName) || 
                         string.IsNullOrWhiteSpace(agentMail) || 
                         string.IsNullOrWhiteSpace(checkerMail))
@@ -165,6 +190,12 @@ namespace OneDriveVideoManager
                     {
                         throw new Exception($"Invalid information for agentGroup('{agentMail}') in AgentAndChecker pair: id={pairId}.");
                     }
+
+                    checkers.Add(new Checker() {
+                        Email = checkerMail,
+                        ListName = targetListName
+                    });
+
                     string agentGroupId = agentGroup?.CurrentPage?.FirstOrDefault()?.Id;
                     var agentGroupMembersRequest = await graphClient.Groups[agentGroupId].Members
                         .Request()
@@ -177,38 +208,48 @@ namespace OneDriveVideoManager
                         agentGroupMembers.AddRange(await agentGroupMembersRequest.NextPageRequest.GetAsync());
                     }
 
+                    List<Recording> checkerVideos = new();
                     bool hasSharingError = false;
                     foreach (User agent in agentGroupMembers) // loop all members
                     {
                         string sharingErrors = "";
                         try
                         {
-                            var agentDetails = await graphClient.Users[agent.Id].Drive
+                            var agentDrive = await graphClient.Users[agent.Id].Drive
                                 .Request()
                                 .WithMaxRetry(_maxRetry)
                                 .GetAsync();
-                            string agentDriveId = agentDetails.Id;
-                            var agentRecordingsRequest = await graphClient.Drives[agentDriveId].Root.ItemWithPath("/Recordings").Children
+
+                            var recordingsFolder = await graphClient.Drives[agentDrive.Id].Root.Children
+                                .Request()
+                                .Filter("name eq \'Recordings\'")
+                                .WithMaxRetry(_maxRetry)
+                                .GetAsync();
+
+                            if (!recordingsFolder.CurrentPage.Any()) { continue; }
+
+                            var agentRecordingsRequest = await graphClient.Drives[agentDrive.Id].Root.ItemWithPath("/Recordings").Children
                                 .Request()
                                 .WithMaxRetry(_maxRetry)
                                 .GetAsync();
 
                             // Create 'Shared Recordings' folder if not created before
-                            var sharedRequest = await graphClient.Drives[agentDriveId].Root.Children
-                                .Request().Filter("name eq \'Shared Recordings\'")
+                            var sharedRequest = await graphClient.Drives[agentDrive.Id].Root.Children
+                                .Request()
+                                .Filter("name eq \'Shared Recordings\'")
                                 .WithMaxRetry(_maxRetry)
                                 .GetAsync();
                             if (!sharedRequest.CurrentPage.Any())
                             {
                                 var stream = new DriveItem { Name = "Shared Recordings", Folder = new Folder() };
-                                await graphClient.Drives[agentDriveId].Root.Children
+                                await graphClient.Drives[agentDrive.Id].Root.Children
                                     .Request()
                                     .WithMaxRetry(_maxRetry)
                                     .AddAsync(stream);
                             }
 
-                            // Share videos in 'Shared Recordings' folder
-                            var sharedFileRequest = await graphClient.Drives[agentDriveId].Root.ItemWithPath("/Shared Recordings")
+                            // Share videos in 'Recordings' folder and move to 'Shared Recordings'
+                            var sharedFileRequest = await graphClient.Drives[agentDrive.Id].Root.ItemWithPath("/Shared Recordings")
                                 .Request()
                                 .WithMaxRetry(_maxRetry)
                                 .GetAsync();
@@ -218,10 +259,11 @@ namespace OneDriveVideoManager
                                 agentRecordingsRequest,
                                 targetListName,
                                 checkerMail,
-                                agentDriveId,
+                                agentDrive.Id,
                                 sharedFileRequest.Id,
-                                agent
-                            );
+                                agent,
+                                checkerVideos);
+
                             if (!string.IsNullOrWhiteSpace(sharingErrors))
                             {
                                 throw new Exception("\n One or more video sharing failed:");
@@ -244,9 +286,10 @@ namespace OneDriveVideoManager
                             log.LogError($"One or more onedrive operation failed. Information: Agent name='{agent.DisplayName}', id={agent.Id} \n {ex.Message}");
                         }
                     }
+                    checkers.Where(e => e.Email == checkerMail).FirstOrDefault().Videos = checkerVideos;
                     if (hasSharingError)
                     {
-                        functionRunLog.Details += "\n One or more onedrive operation failed, please check SP list 'ShareVideoErrorLog' for reference.\n";
+                        functionRunLog.Details += "One or more onedrive operation failed, please check SP list 'ShareVideoErrorLog' for reference.\n";
                     }
 
                 }
@@ -254,7 +297,7 @@ namespace OneDriveVideoManager
                 {
                     if (string.IsNullOrWhiteSpace(functionRunLog.Details))
                     {
-                        functionRunLog.Details = "\n One or more agentGroup operations, please check SP list 'ShareVideoErrorLog' for reference.\n";
+                        functionRunLog.Details = "One or more agentGroup video sharing failed, please check SP list 'ShareVideoErrorLog' for reference.\n";
                     }
                     errorLogs.Add(new ErrorLog
                     {
@@ -266,9 +309,62 @@ namespace OneDriveVideoManager
                     log.LogError($"FAILED: manage videos for agentGroup: {agentMail}");
                 }
             });
-            log.LogCritical($"SUCCEEDED: agentGroups' videos' access updated. Time: {DateTime.Now}");
+            log.LogCritical($"SUCCEEDED: agentGroups' videos' access updated.   Ended at: {DateTime.Now}");
         }
 
+
+        private async Task SendEmailToChecker(
+            ILogger log,
+            GraphServiceClient graphClient,
+            List<Checker> checkers,
+            List<ErrorLog> errorLogs,
+            FunctionRunLog functionRunLog
+        )
+        {
+            try
+            {
+                functionRunLog.LastStep = "Send email notification to checkers";
+                bool hasError = false;
+                await Parallel.ForEachAsync(checkers, async (checker, cancellationToken) =>
+                {
+                    if (checker.Videos.Count > 0)
+                    {
+                        try
+                        {
+                            await MailService.SendNotificationEmail(
+                                log,
+                                graphClient,
+                                checker);
+                        }
+                        catch (Exception ex)
+                        {
+                            errorLogs.Add(new ErrorLog
+                            {
+                                FunctionName = "SendEmailToChecker",
+                                StaffName = "",
+                                StaffEmail = checker.Email,
+                                Details = $"{ex.Message} \n {ex.InnerException?.Message ?? ""}"
+                            });
+                            if (!hasError)
+                            { 
+                                hasError = true;
+                            }
+                        }
+                    }
+                });
+                if (hasError)
+                {
+                    functionRunLog.Details += "One or more email notification to checker failed. \n";
+                }
+                log.LogCritical($"SUCCEEDED: send email to checkers.   Ended at: {DateTime.Now}");
+
+            }
+            catch (Exception ex)
+            {
+                functionRunLog.Details += ex.Message;
+                log.LogError($"FAILED: send email to checkers. \n{ex.Message} \n{ex.InnerException?.Message ?? ""}");
+            }
+        }
 
         private async Task<string> ShareVideosInOneDrive(
             ILogger log,
@@ -279,6 +375,7 @@ namespace OneDriveVideoManager
             string agentDriveId,
             string sharedFileId,
             User agent,
+            List<Recording> checkerVideos,
             string errors = ""
         )
         {
@@ -332,7 +429,7 @@ namespace OneDriveVideoManager
                         {
                             AdditionalData = new Dictionary<string, object>()
                             {
-                                {"Title", "New video"},
+                                {"Title", video.Name},
                                 {"Checked", false},
                                 {"Duration", formattedDuration},
                                 {"LinkToVideo", itemLink}
@@ -343,6 +440,14 @@ namespace OneDriveVideoManager
                         .Request()
                         .WithMaxRetry(_maxRetry)
                         .AddAsync(newItem);
+
+                    // Add to checkerVideo list for email content afterward
+                    checkerVideos.Add(new Recording()
+                    {
+                        Name = video.Name,
+                        Link = itemLink,
+                        Duration = formattedDuration
+                    });
 
                     // Update video reference
                     DriveItem videoNewRoot = new DriveItem

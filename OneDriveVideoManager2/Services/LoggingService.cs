@@ -12,8 +12,11 @@ namespace OneDriveVideoManager.Services
     public static class LoggingService
     {
         private static readonly int _maxRetry = 2;
+        private static readonly string _hostName = Environment.GetEnvironmentVariable("APPSETTING_HostName");
+        private static readonly string _spSiteRelativePath = Environment.GetEnvironmentVariable("APPSETTING_SpSiteRelativePath");
+        private static readonly string _targetListName = Environment.GetEnvironmentVariable("APPSETTING_FunctionRunLogListName");
 
-        public static async Task CreateFunctionRunLogToSP(
+        public static async Task PostFunctionRunLogToSP(
             ILogger log,
             GraphServiceClient graphClient,
             FunctionRunLog functionRunLog
@@ -21,13 +24,10 @@ namespace OneDriveVideoManager.Services
         {
             try
             {
-                if (functionRunLog.Status == "Running")
+                if (functionRunLog.Status != "Failed")
                 {
                     functionRunLog.Status = "Succeeded";
                 }
-                string hostName = Environment.GetEnvironmentVariable("APPSETTING_HostName");
-                string spSiteRelativePath = Environment.GetEnvironmentVariable("APPSETTING_SpSiteRelativePath");
-                string targetListName = Environment.GetEnvironmentVariable("APPSETTING_FunctionRunLogListName");
 
                 ListItem newItem = new ListItem
                 {
@@ -42,12 +42,31 @@ namespace OneDriveVideoManager.Services
                         }
                     }
                 };
-                await graphClient.Sites.GetByPath(spSiteRelativePath, hostName).Lists[targetListName].Items
-                    .Request()
-                    .WithMaxRetry(_maxRetry)
-                    .AddAsync(newItem);
+                if (functionRunLog.FunctionName.ToLower() == "updateusergroup")
+                {
+                    newItem.Fields.AdditionalData.Add("TotalRecords", functionRunLog.TotalRecords);
+                    newItem.Fields.AdditionalData.Add("UpdatedRecords", functionRunLog.UpdatedRecords);
+                }
 
-                log.LogCritical($"SUCCEEDED: Create SP functionRunLog. Time: {DateTime.Now}");
+                if (string.IsNullOrWhiteSpace(functionRunLog.Id))
+                {
+                    ListItem newLog = await graphClient.Sites.GetByPath(_spSiteRelativePath, _hostName).Lists[_targetListName].Items
+                        .Request()
+                        .WithMaxRetry(_maxRetry)
+                        .AddAsync(newItem); // create new
+
+                    functionRunLog.Id = newLog.Id;
+                }
+                else
+                {
+                    await graphClient.Sites.GetByPath(_spSiteRelativePath, _hostName).Lists[_targetListName].Items[functionRunLog.Id]
+                        .Request()
+                        .WithMaxRetry(_maxRetry)
+                        .UpdateAsync(newItem); // update
+                }
+
+                log.LogCritical($"SUCCEEDED: Post SP functionRunLog.   Time: {DateTime.Now}");
+
             }
             catch (Exception ex)
             {
@@ -66,8 +85,6 @@ namespace OneDriveVideoManager.Services
         {
             try
             {
-                string hostName = Environment.GetEnvironmentVariable("APPSETTING_HostName");
-                string spSiteRelativePath = Environment.GetEnvironmentVariable("APPSETTING_SpSiteRelativePath");
                 functionRunLog.LastStep = "Create ErrorLog(s) to SP";
 
                 await Parallel.ForEachAsync(errorLogs, async (errorLog, cancellationToken) => 
@@ -85,13 +102,14 @@ namespace OneDriveVideoManager.Services
                             }
                         }
                     };
-                    await graphClient.Sites.GetByPath(spSiteRelativePath, hostName).Lists[targetListName].Items
+                    await graphClient.Sites.GetByPath(_spSiteRelativePath, _hostName).Lists[targetListName].Items
                         .Request()
                         .WithMaxRetry(_maxRetry)
                         .AddAsync(newItem);
                 });
                 
-                log.LogCritical($"SUCCEEDED: Create SP errorLog(s). Time: {DateTime.Now}");
+                log.LogCritical($"SUCCEEDED: Create SP errorLog(s).   Time: {DateTime.Now}");
+
             }
             catch (Exception ex)
             {

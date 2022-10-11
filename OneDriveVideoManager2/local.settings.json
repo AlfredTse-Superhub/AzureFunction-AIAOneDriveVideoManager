@@ -8,6 +8,9 @@
         "APPSETTING_TenantId": "16660935-a3e1-4737-828b-b2676b4f8ec0",
         "APPSETTING_ClientId": "10a9cb21-2b0c-4593-8b47-257a884e1d9a",
         "APPSETTING_ClientSecret": "Xes8Q~ikXYzTriVUL0pQ_CSo0ci7zaf1FE-PqbsF",
+        "APPSETTING_TenantId-Test": "9827129b-e7c9-4ae5-9b41-6e3f4d3ba637", //for mailing test
+        "APPSETTING_ClientId-Test": "dde40ae1-3520-4096-bc59-3e6984ce7ca6", //for mailing test
+        "APPSETTING_ClientSecret-Test": "7WV7Q~nSJE7PV-XMJdwkfwRBY21VQRdAW4Zbw", //for mailing test
         "APPSETTING_HostName": "M365x13740622.sharepoint.com",
         "APPSETTING_SpSiteRelativePath": "sites/AgentOneDriveVideo",
         "APPSETTING_AgentCheckerListName": "AgentAndChecker",
@@ -19,6 +22,10 @@
         "APPSETTING_EmailSender": "admin@M365x13740622.onmicrosoft.com",
         "APPSETTING_EmailRecipient": "admin@M365x13740622.onmicrosoft.com",
         "APPSETTING_EmailCCRecipient": "",
+        "APPSETTING_EmailSender-Test": "alfred.tse@superhub.com.hk", //for mailing test
+        "APPSETTING_EmailRecipient-Test": "alfred.tse@superhub.com.hk", //for mailing test
+        "APPSETTING_EmailCCRecipient-Test": "", //for mailing test
+        "APPSETTING_SendEmailWithTestTenant": true, //for mailing test
         "APPSETTING_FunctionAppName": "OneDriveVideoManager-AIA",
         "APPSETTING_GithubURL": "https://github.com/AlfredTse-Superhub/AzureFunction-AIAOneDriveVideoManager"
     }
