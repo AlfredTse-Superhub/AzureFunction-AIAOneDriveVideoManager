@@ -4,6 +4,8 @@
     "Values": {
         "AzureWebJobsStorage": "UseDevelopmentStorage=true",
         "FUNCTIONS_WORKER_RUNTIME": "dotnet",
+        "APPSETTING_ScheduleTriggerTime-ShareVideo": "0 30 7 * * *",
+        "APPSETTING_ScheduleTriggerTime-UpdateGroup": "0 50 7 * * *",
         "APPSETTING_TenantURL": "https://m365x13740622-my.sharepoint.com",
         "APPSETTING_TenantId": "16660935-a3e1-4737-828b-b2676b4f8ec0",
         "APPSETTING_ClientId": "10a9cb21-2b0c-4593-8b47-257a884e1d9a",

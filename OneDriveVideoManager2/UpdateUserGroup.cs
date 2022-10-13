@@ -23,7 +23,7 @@ namespace OneDriveVideoManager
         private byte[] _docContent;
 
         [FunctionName("UpdateUserGroup")]
-        public async Task Run([TimerTrigger("0 0 10 * * *")]TimerInfo myTimer, ILogger log)
+        public async Task Run([TimerTrigger("%APPSETTING_ScheduleTriggerTime-UpdateGroup%")]TimerInfo myTimer, ILogger log)
         {
             log.LogInformation($"C# Timer trigger function({_functionName}) executed at: {DateTime.Now}");
 
@@ -166,75 +166,6 @@ namespace OneDriveVideoManager
                     functionRunLog);
 
                 return excelData;
-                //// Create List<UserGroup> from excel data
-                //List<UserGroup> userGroups = new List<UserGroup>();
-                //System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
-                //int rowNo = 1;
-                //using (docStream)
-                //{
-                //    using (var reader = ExcelReaderFactory.CreateReader(docStream))
-                //    {
-                //        while (reader.Read()) //Each ROW
-                //        {
-                //            if (rowNo > 1) //Skip header line
-                //            {
-                //                UserGroup newUserGroup = new UserGroup();
-                //                var properties = newUserGroup.GetType().GetProperties();
-                //                properties[0].SetValue(newUserGroup, rowNo, null);
-                //                for (int column = 0; column < reader.FieldCount; column++)
-                //                {
-                //                    properties[column + 1].SetValue(newUserGroup, reader.GetValue(column), null);
-                //                }
-                //                bool isDuplicated = userGroups.Where(e => e.StaffEmail == newUserGroup.StaffEmail).Any();
-                //                if (!isDuplicated) //Drop duplicated email row
-                //                {
-                //                    userGroups.Add(newUserGroup);
-                //                }
-                //            }
-                //            rowNo++;
-                //        }
-                //    }
-                //}
-                //functionRunLog.TotalRecords = rowNo - 1;
-
-                //// Create List<AADGroup> from fetching 'videosharingflow' related groups
-                //var getGroupsResult = await graphClient.Groups
-                //    .Request()
-                //    .WithMaxRetry(_maxRetry)
-                //    .GetAsync();
-
-                //// Page through collections
-                //List<Group> allGroups = getGroupsResult.CurrentPage.ToList();
-                //while (getGroupsResult.NextPageRequest != null)
-                //{
-                //    allGroups.AddRange(await getGroupsResult.NextPageRequest.GetAsync());
-                //}
-                //allGroups = allGroups.Where(e => e.Description?.ToLower() == "videosharingflow").ToList();
-
-                //List<AADGroup> aadGroups = new List<AADGroup>();
-                //foreach (Group group in allGroups)
-                //{
-                //    var memberListResult = await graphClient.Groups[group.Id].Members
-                //        .Request()
-                //        .WithMaxRetry(_maxRetry)
-                //        .GetAsync();
-                //    // Page through collections
-                //    List<DirectoryObject> memberList = memberListResult.CurrentPage.ToList(); 
-                //    while (memberListResult.NextPageRequest != null)
-                //    {
-                //        memberList.AddRange(await memberListResult.NextPageRequest.GetAsync());
-                //    }
-                //    aadGroups.Add(new AADGroup()
-                //    {
-                //        GroupId = group.Id,
-                //        GroupName = group.DisplayName,
-                //        MemberList = memberList
-                //    });
-                //}
-
-                //log.LogCritical($"SUCCEEDED: Process excel data.   Ended at: {DateTime.Now}");
-
-                //return (userGroups, aadGroups);
 
             }
             catch (Exception ex)
